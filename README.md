@@ -19,3 +19,5 @@ A shell script that setups a local [Firecracker](https://github.com/firecracker-
 
 ## verify_install.sh
 A shell script that verifies the setup from prerequisite-install.sh and renames firecracker and jailer binaries to simply 'firecracker' and 'jailer' for future shell scripting.
+## run_firecracker.sh
+A shell script that clears linux socket from a prior use and runs the firecracker binary. Run it in a new 

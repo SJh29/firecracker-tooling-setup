@@ -1,1 +1,15 @@
-.squashfs.upstream
+ubuntu-24.04.squashfs.upstream
+.vscode/*
+squashfs-root/
+*.id_rsa
+*.pem
+*.key
+*.crt
+*.csr
+*.pfx
+*.pub
+*.env
+*.ext4
+release-*/
+firecracker
+jailer

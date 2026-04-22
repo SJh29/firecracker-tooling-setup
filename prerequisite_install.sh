@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 ARCH="$(uname -m)"
 release_url="https://github.com/firecracker-microvm/firecracker/releases"
 
@@ -23,23 +24,34 @@ if [[ -f "$kernel_filename" ]]; then
 else
   echo "Downloading kernel: $kernel_filename"
   # Download a linux kernel binary
-  wget "https://s3.amazonaws.com/spec.ccfc.min/${latest_kernel_key}"
+  wget "https://s3.amazonaws.com/spec.ccfc.min/${latest_kernel_key}" 
 fi
  
-# Download rootfs 
-wget -O ubuntu-$ubuntu_version.squashfs.upstream "https://s3.amazonaws.com/spec.ccfc.min/$latest_ubuntu_key"
+# Download rootfs  
+if [[ -f "ubuntu-$ubuntu_version.squashfs.upstream" ]]; then
+  echo "Skipping rootfs download, already exists: ubuntu-$ubuntu_version.squashfs.upstream"
+else
+  echo "Downloading rootfs: ubuntu-$ubuntu_version.squashfs.upstream"
+  wget -O ubuntu-$ubuntu_version.squashfs.upstream "https://s3.amazonaws.com/spec.ccfc.min/$latest_ubuntu_key" 
+fi
+
 
 # The rootfs in AWS CI doesn't contain SSH keys to connect to the VM
-unsquashfs ubuntu-$ubuntu_version.squashfs.upstream
-ssh-keygen -f id_rsa -N ""
+if [[ ! -d "squashfs-root" ]]; then
+  echo "Extracting rootfs and setting up SSH keys..."
+  unsquashfs ubuntu-$ubuntu_version.squashfs.upstream
+  ssh-keygen -f id_rsa -N "" < /dev/null
 
-cp -v id_rsa.pub squashfs-root/root/.ssh/authorized_keys
-mv -v id_rsa ./ubuntu-$ubuntu_version.id_rsa
+  cp -v id_rsa.pub squashfs-root/root/.ssh/authorized_keys
+  mv -v id_rsa ./ubuntu-$ubuntu_version.id_rsa
 
-# create ext4 filesystem image
-sudo chown -R root:root squashfs-root
-truncate -s 1G ubuntu-$ubuntu_version.ext4
-sudo mkfs.ext4 -d squashfs-root -F ubuntu-$ubuntu_version.ext4
+  # create ext4 filesystem image
+  sudo chown -R root:root squashfs-root
+  truncate -s 1G ubuntu-$ubuntu_version.ext4
+  sudo mkfs.ext4 -d squashfs-root -F ubuntu-$ubuntu_version.ext4
+else
+  echo "Skipping rootfs extraction, 'squashfs-root' directory already exists."
+fi
 
 # Firecracker Binary download + verification via SHA256
 
@@ -53,18 +65,18 @@ if [[ ! -f "$ARCHIVE" ]]; then
   curl -L ${release_url}/download/${latest_version}/firecracker-${latest_version}-${ARCH}.tgz.sha256.txt
 fi
  
-if [[ ! -f "$SHA_FILE" ]]; then
-  echo "Error: SHA256 file not found: $SHA_FILE" >&2
+if [[ ! -f "$SHA256" ]]; then
+  echo "Error: SHA256 file not found: $SHA256" >&2
   exit 1
 fi
 
 # Verify SHA256 checksum
 echo "Verifying SHA256 checksum..."
 if command -v sha256sum &>/dev/null; then
-  EXPECTED="$(awk '{print $1}' "$SHA_FILE")"
+  EXPECTED="$(awk '{print $1}' "$SHA256")"
   ACTUAL="$(sha256sum "$ARCHIVE" | awk '{print $1}')"
 elif command -v shasum &>/dev/null; then
-  EXPECTED="$(awk '{print $1}' "$SHA_FILE")"
+  EXPECTED="$(awk '{print $1}' "$SHA256")"
   ACTUAL="$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')"
 else
   echo "Error: No SHA256 utility found (sha256sum or shasum required)." >&2
@@ -79,8 +91,11 @@ if [[ "$ACTUAL" != "$EXPECTED" ]]; then
 fi
  
 echo "SHA256 verified successfully."
- 
-# Extract archive
-echo "Extracting $ARCHIVE..."
-tar -xzf "$ARCHIVE"
-echo "Done."
+if [[ -d "release-${latest_version}-${ARCH}" ]]; then
+  echo "Skipping extraction, directory 'release-${latest_version}-${ARCH}' already exists."
+else
+  # Extract archive
+  echo "Extracting $ARCHIVE..."
+  tar -xzf "$ARCHIVE"
+  echo "Done."
+fi

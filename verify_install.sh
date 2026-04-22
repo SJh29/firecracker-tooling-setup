@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+# =============================================================================
 # Verify everything was correctly set up and print versions
 echo
 echo "The following files were downloaded and set up:"
@@ -34,12 +36,21 @@ fi
 
 # Rename Binaries
 # Rename the binary to "firecracker"
-mv release-${latest}-${ARCH}/firecracker-${latest}-${ARCH} firecracker
-echo "firecracker binary renamed to 'firecracker'"
+if [[ -f "firecracker" ]]; then
+  echo "Skipping firecracker binary rename, 'firecracker' already exists."
+else
+  mv release-${latest_version}-${ARCH}/firecracker-${latest_version}-${ARCH} firecracker
+  echo "firecracker binary renamed to 'firecracker'"
+
+fi
 
 # Rename the binary to "jailer"
-mv release-${latest}-${ARCH}/jailer-${latest}-${ARCH} jailer
-echo "jailer binary renamed to 'jailer'"
+if [[ -f "jailer" ]]; then
+  echo "Skipping jailer binary rename, 'jailer' already exists."
+else
+  mv release-${latest_version}-${ARCH}/jailer-${latest_version}-${ARCH} jailer
+  echo "jailer binary renamed to 'jailer'"
+fi
 
-echo '******'
+echo 
 echo "Firecracker installation verified"
