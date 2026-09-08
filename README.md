@@ -36,8 +36,8 @@ sudo apt-get update -y
 sudo apt-get install -y git git-lfs          # needed before clone
 sudo apt-get install -y build-essential      # not required but handy to have for troubleshooting
 
-git clone https://github.com/SJh29/firecracker-lambda-emulator.git
-cd firecracker-lambda-emulator
+git clone https://github.com/SJh29/fish-faas-emul.git
+cd fish-faas-emul
 
 # Confirm cgroup v2 is active (EC2 metal Ubuntu 22.04 default).
 # If this prints anything other than `cgroup2fs`, reboot with
