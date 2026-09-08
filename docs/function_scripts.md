@@ -16,9 +16,9 @@ Every VM is identified by an integer **instance id** `k`, starting at 0. All of 
 | Scratch (`/tmp`) | `instances/scratch-<k>.ext4` | `instances/scratch-0.ext4` | `instances/scratch-1.ext4` |
 | Config | `instances/vm_config-<k>.json` | `instances/vm_config-0.json` | `instances/vm_config-1.json` |
 | TAP device | `tap<k>` | `tap0` | `tap1` |
-| Host IP | `172.16.0.<4k+1>` | `172.16.0.1` | `172.16.0.5` |
-| Guest IP | `172.16.0.<4k+2>` | `172.16.0.2` | `172.16.0.6` |
-| Guest MAC | `06:00:AC:10:00:<4k+2>` | `...:02` | `...:06` |
+| Host IP | `172.16.<k/64>.<4(k%64)+1>` | `172.16.0.1` | `172.16.0.5` |
+| Guest IP | `172.16.<k/64>.<4(k%64)+2>` | `172.16.0.2` | `172.16.0.6` |
+| Guest MAC | `06:00:AC:10:<k/64>:<4(k%64)+2>` (hex) | `...:00:02` | `...:00:06` |
 | cgroup | `/sys/fs/cgroup/firecracker/vm<k>` | `.../vm0` | `.../vm1` |
 | CPU set | `vcpu_count` whole physical cores | e.g. `0,2` | e.g. `4,6` |
 
@@ -32,7 +32,7 @@ Every VM is identified by an integer **instance id** `k`, starting at 0. All of 
 
 Each VM also gets its **own point-to-point /30**, so the host routing table stays unambiguous. Nothing writable is shared, so concurrent VMs can't corrupt each other's disk.
 
-Instance 0 resolves to exactly the old single-VM values, so the previous setup is just the `k=0` case of this one. The last usable /30 is `172.16.0.252`, capping the design at **64 instances** (`k` = 0..63).
+Instance 0 resolves to exactly the old single-VM values, so the previous setup is just the `k=0` case of this one. The /30s tile the whole of `172.16.0.0/16` -- the third octet supplies 256 blocks of 64 subnets each -- so the addressing caps the design at **16384 instances** (`k` = 0..16383, last usable /30 `172.16.255.252`). That is `MAX_INSTANCES` in [common.sh](../common.sh) and it is the only *hard* ceiling; in practice host RAM binds long first (see [the memory ceiling](#the-memory-ceiling) below).
 
 The addressing helpers (`fc_socket`, `fc_scratch`, `fc_tap`, `fc_host_ip`, `fc_guest_ip`, `fc_mac`, `fc_instances`) all live in [common.sh](../common.sh) -- no script hardcodes these paths. The CPU topology helpers (`fc_cpu_list`, `fc_cpu_pool`, `fc_cpu_nodes`, `fc_cpu_count`, `fc_reserved_cpus`, `fc_free_cpus`) live there too.
 
@@ -57,7 +57,7 @@ sudo ./run_firecracker.sh -n 4 -S 256        # 4 VMs, 256 MiB /tmp each
 
 | Flag | Description | Default |
 |---|---|---|
-| `-n NUM_INSTANCES` | Number of concurrent microVMs (1–64) | `1` |
+| `-n NUM_INSTANCES` | Number of concurrent microVMs. Refused if the fleet won't fit in host RAM, or past `MAX_INSTANCES` (16384) | `1` |
 | `-m MEM_MIB` | Guest memory per VM; also rewrites `func_mem_size` in the boot args | from template (`3538`) |
 | `-S SCRATCH_MB` | Size of each VM's writable `/tmp` scratch drive | `128` |
 | `-u` | Run unmetered (`cpu.max=max`) instead of enforcing the Lambda quota | off |
@@ -67,12 +67,41 @@ sudo ./run_firecracker.sh -n 4 -S 256        # 4 VMs, 256 MiB /tmp each
 | `CPU_POOL` | The set of host CPUs the whole fleet shares, as either a cpuset list (`0-23,48-71`) or a count of CPUs | the whole host |
 | `OVERSUB` | Requested vCPUs per pool CPU; sizes the pool to `ceil(N × vcpu_count / OVERSUB)`. Ignored when `CPU_POOL` is set | -- |
 | `CPU_MAX` | Raw `cpu.max` quota; overrides both the default and `-u` | -- |
+| `FC_HOST_RESERVE_MIB` | RAM held back for the host itself when sizing the `-n` ceiling | `2048` |
+| `FC_VMM_OVERHEAD_MIB` | Firecracker's own footprint per VM, on top of guest RAM | `8` |
 
 **What it does, per instance:**
 1. Creates a fresh `${SCRATCH_MB}` MiB ext4 scratch image → `instances/scratch-<k>.ext4` (`mkfs.ext4` each launch, so `/tmp` starts empty and identical every run). The rootfs is **not** copied -- all instances share `aws_baseimage.ext4` read-only.
 2. Renders `vm_config.template.json` → `instances/vm_config-<k>.json`, substituting the scratch path, TAP device, MAC, and the `guest_ip=`/`gateway=` kernel boot args.
 3. Creates the leaf cgroup `/sys/fs/cgroup/firecracker/vm<k>` and enrolls that VM in it, so the CPU quota is per-instance rather than shared.
 4. Launches Firecracker on `/tmp/firecracker/<k>.socket`, with its console redirected to `logs/<timestamp>/console-<k>.log`.
+
+### The memory ceiling
+
+`-n` is checked against host RAM before the run starts, and refused if the fleet won't fit:
+
+```
+capacity = (MemTotal - FC_HOST_RESERVE_MIB) / (mem_size_mib + FC_VMM_OVERHEAD_MIB)
+```
+
+The check is a hard error rather than a warning because memory, unlike CPU, does not degrade gracefully: an overcommitted fleet is not a slow run but an OOM kill partway through one, which corrupts the measurement instead of merely slowing it. CPU overcommit stays a warning for exactly that reason -- contention is a legitimate thing to measure.
+
+`MemTotal` is used rather than `MemAvailable` so the ceiling is a property of the host, identical on every run, instead of a function of how full the page cache happens to be at launch. The two knobs are the reserve the host keeps for itself (page cache, the collectors, the load generator) and Firecracker's per-VM footprint on top of guest RAM; lower them to pack the host tighter, raise them to be more conservative:
+
+```bash
+# 192 GiB host, 3538 MiB guests -> capacity 54
+sudo ./run_firecracker.sh -n 60                              # refused
+sudo FC_HOST_RESERVE_MIB=1024 ./run_firecracker.sh -n 60     # capacity 55 -> still refused
+sudo ./run_firecracker.sh -n 60 -m 1024                      # smaller guests, fits
+```
+
+At launch the script reports where the fleet sits against the ceiling:
+
+```
+Memory: 3538 MiB x 32 of 196608 MiB host (capacity 54 instances)
+```
+
+Note that the ceiling tracks `-m`, so a memory sweep silently changes how many VMs a given host will accept -- at the template's 3538 MiB a 192 GiB host takes 54, at 128 MiB it takes 1430.
 
 ### CPU quota and the shared pool
 
@@ -135,7 +164,7 @@ sudo ./function_scripts/setup_tap.sh -n 4
 ```
 
 **What it does:**
-1. For each `k` in `0..N-1`: deletes any stale `tap<k>`, then recreates it at `172.16.0.<4k+1>/30`.
+1. For each `k` in `0..N-1`: deletes any stale `tap<k>`, then recreates it at `172.16.<k/64>.<4(k%64)+1>/30`.
 2. Enables IPv4 forwarding (`/proc/sys/net/ipv4/ip_forward`).
 3. Sets `iptables FORWARD` policy to `ACCEPT`.
 4. Adds a single `MASQUERADE` NAT rule on the host's default interface -- one rule covers every TAP.
@@ -162,7 +191,7 @@ Re-run this whenever the function changes. The previous `function.ext4` is alway
 
 Sends a JSON payload to the Lambda Runtime Interface Emulator (RIE) inside a guest and prints the response.
 
-**Requires:** A running VM reachable at `172.16.0.<4k+2>:8080`, `curl`, `jq`.
+**Requires:** A running VM reachable at `172.16.<k/64>.<4(k%64)+2>:8080`, `curl`, `jq`.
 
 | Flag | Description | Default |
 |---|---|---|

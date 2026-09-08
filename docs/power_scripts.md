@@ -295,7 +295,7 @@ sudo ./power-scripts/fc_experiment.sh [OPTIONS]
 | Flag | Description | Default |
 |---|---|---|
 | `-n COUNT` | Number of invocation rounds | `10` |
-| `-N NUM_VMS` | Concurrent microVMs (1–64) | `1` |
+| `-N NUM_VMS` | Concurrent microVMs. Passed to `run_firecracker.sh -n`, which refuses a fleet that won't fit in host RAM -- see [the memory ceiling](function_scripts.md#the-memory-ceiling) | `1` |
 | `-s SOCKET_DIR` | Firecracker socket directory | `/tmp/firecracker` |
 | `-l LAUNCH_SCRIPT` | Path to `run_firecracker.sh` | `../run_firecracker.sh` |
 | `-I INVOKE_SCRIPT` | Path to `invoke.sh` | `../function_scripts/invoke.sh` |

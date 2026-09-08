@@ -37,9 +37,11 @@ Network constants and helper functions sourced by the operational scripts (`run_
 | `API_SOCKET_FOLDER` | Directory holding the per-instance API sockets (`<k>.socket`) | `/tmp/firecracker` |
 | `FC_RUN_DIR` | Directory holding the per-instance scratch drives and generated configs | `<repo>/instances` |
 | `LOGFILE` | Path for Firecracker log output | `./firecracker.log` |
-| `NET_PREFIX` | First three octets of the guest network | `172.16.0` |
+| `NET_PREFIX` | First two octets of the guest network; the last two are derived from `k` | `172.16` |
 | `MASK_SHORT` | Subnet mask in CIDR notation for each TAP network | `/30` |
-| `MAX_INSTANCES` | Instance-id ceiling (last usable /30 is `172.16.0.252`) | `64` |
+| `MAX_INSTANCES` | Instance-id ceiling -- the /30s tile all of `172.16.0.0/16`, last usable one `172.16.255.252` | `16384` |
+| `FC_HOST_RESERVE_MIB` | RAM held back for the host itself when sizing the fleet | `2048` |
+| `FC_VMM_OVERHEAD_MIB` | Firecracker's own footprint per VM, on top of guest RAM | `8` |
 | `LAMBDA_PORT` | Port the Lambda Runtime Interface Emulator listens on inside the guest | `8080` |
 | `TAP_DEV`, `TAP_IP`, `GUEST_IP`, `FC_MAC` | Back-compat aliases for instance 0 (`tap0`, `172.16.0.1`, `172.16.0.2`, `06:00:AC:10:00:02`) | -- |
 
@@ -56,11 +58,13 @@ Every host resource a VM owns is derived from its instance id, so no two instanc
 | `fc_scratch` | `fc_scratch [k]` | `instances/scratch-<k>.ext4` (writable `/tmp` drive) | `instances/scratch-0.ext4` |
 | `fc_rootfs` | `fc_rootfs [k]` | `instances/rootfs-<k>.ext4` -- used **only** by the reflink benchmark (`temp_reflink_setup.sh`); the main path shares one read-only rootfs | `instances/rootfs-0.ext4` |
 | `fc_tap` | `fc_tap [k]` | `tap<k>` | `tap0` |
-| `fc_host_ip` | `fc_host_ip [k]` | `172.16.0.<4k+1>` | `172.16.0.1` |
-| `fc_guest_ip` | `fc_guest_ip [k]` | `172.16.0.<4k+2>` | `172.16.0.2` |
-| `fc_mac` | `fc_mac [k]` | `06:00:AC:10:00:<4k+2>` | `06:00:AC:10:00:02` |
+| `fc_host_ip` | `fc_host_ip [k]` | `172.16.<k/64>.<4(k%64)+1>` | `172.16.0.1` |
+| `fc_guest_ip` | `fc_guest_ip [k]` | `172.16.<k/64>.<4(k%64)+2>` | `172.16.0.2` |
+| `fc_mac` | `fc_mac [k]` | `06:00:AC:10:<k/64>:<4(k%64)+2>`, both in hex | `06:00:AC:10:00:02` |
 | `fc_instances` | `fc_instances` | Ids of the VMs currently up, ascending, one per line -- derived from the sockets on disk, so any script can discover the running set without being told how many were launched | -- |
-| `fc_check_instance` | `fc_check_instance <k>` | Non-zero (with an error) if `k` is not an integer in `0..63` | -- |
+| `fc_check_instance` | `fc_check_instance <k>` | Non-zero (with an error) if `k` is not an integer in `0..MAX_INSTANCES-1` (`0..16383`) | -- |
+| `fc_host_mem_mib` | `fc_host_mem_mib` | Total host RAM in MiB, from `MemTotal` | -- |
+| `fc_mem_capacity` | `fc_mem_capacity <mem_mib>` | How many instances of that guest size the host can carry: `(MemTotal - FC_HOST_RESERVE_MIB) / (mem_mib + FC_VMM_OVERHEAD_MIB)`, or `0` when one does not fit. `run_firecracker.sh` refuses `-n` above this | -- |
 
 ### Helper Functions
 
