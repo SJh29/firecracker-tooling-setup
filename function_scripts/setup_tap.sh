@@ -4,7 +4,7 @@
 #
 # Creates one TAP device per Firecracker instance, each on its own /30 so the
 # host has an unambiguous route to every guest. Instance k gets tap<k> with host
-# address 172.16.0.<4k+1>, facing guest 172.16.0.<4k+2>. See common.sh.
+# address 172.16.<k/64>.<4(k%64)+1>, guest 172.16.<k/64>.<4(k%64)+2>. See common.sh.
 #
 # Usage: sudo ./setup_tap.sh [-n NUM_INSTANCES]   (default: 1)
 #
