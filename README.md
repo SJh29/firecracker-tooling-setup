@@ -1,7 +1,7 @@
 # FaaS Infrastructure Simulator Harness (FISH)
-## Firecracker Based Lambda Emulator
+## Firecracker Based FaaS Simulator
 
-FISH is an AWS Lambda emulator built on [Firecracker](https://github.com/firecracker-microvm/firecracker) microVMs, running actual AWS Lambda base images. In head-to-head benchmarking against real AWS Lambda on identical hardware, observed performance differs by approximately 0.5% in SAAF metrics overall.
+FISH is a FaaS Infrastructure Simulator set to emulate AWS Lambda, built on [Firecracker](https://github.com/firecracker-microvm/firecracker) microVMs, running actual AWS Lambda base images. In head-to-head benchmarking against real AWS Lambda on identical hardware, observed performance differs by approximately 0.5% in SAAF metrics overall.
 
 ## Fidelity vs. real AWS Lambda
 
