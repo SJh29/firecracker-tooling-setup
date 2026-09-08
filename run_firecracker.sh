@@ -5,7 +5,9 @@
 # Usage: sudo ./run_firecracker.sh [-m MEM_MIB] [-n NUM_INSTANCES] [-S SCRATCH_MB] [-u]
 #   -m MEM_MIB        Guest memory (MiB). Also rewrites func_mem_size in
 #                     boot_args so the guest init agrees with machine-config.
-#   -n NUM_INSTANCES  Number of concurrent microVMs (default 1).
+#   -n NUM_INSTANCES  Number of concurrent microVMs (default 1). Refused if the
+#                     fleet would not fit in host RAM, or past 16384 instances
+#                     (the addressing ceiling; see MAX_INSTANCES in common.sh).
 #   -S SCRATCH_MB     Size of each VM's writable /tmp scratch drive (default 128).
 #   -u                Run unmetered (cpu.max=max). Default enforces the Lambda
 #                     quota of mem/1769 vCPUs per instance.
@@ -19,6 +21,10 @@
 #                     as many CPUs as it requests, 2 gives it half. Ignored when
 #                     CPU_POOL is set.
 #   CPU_MAX           Raw cpu.max quota; overrides both the default and -u.
+#   FC_HOST_RESERVE_MIB   RAM held back for the host (default 2048) and
+#   FC_VMM_OVERHEAD_MIB   Firecracker's own footprint per VM (default 8).
+#                     Together these set the -n ceiling; raise them to be more
+#                     conservative, lower them to pack the host tighter.
 #
 # ── Design ──────────────────────────────────────────────────────────────────
 # Every resource a VM touches is either shared and read-only, or private to that
@@ -63,6 +69,28 @@ done
     || { error "-n must be a positive integer (got '$NUM_INSTANCES')"; exit 1; }
 fc_check_instance "$(( NUM_INSTANCES - 1 ))" || exit 1
 
+# Guest memory is resolved here rather than alongside the CPU quota below so the
+# fleet can be sized against host RAM before any host state exists 
+MEM_MIB=$(jq -r '."machine-config".mem_size_mib' "$HERE/vm_config.template.json")
+[[ -n "$MEM_OVERRIDE" ]] && MEM_MIB="$MEM_OVERRIDE"
+[[ "$MEM_MIB" =~ ^[0-9]+$ ]] && (( MEM_MIB >= 1 )) \
+    || { error "guest memory must be a positive integer (got '$MEM_MIB')"; exit 1; }
+
+# Memory ceiling. 
+HOST_MEM_MIB="$(fc_host_mem_mib)"
+MEM_CAPACITY="$(fc_mem_capacity "$MEM_MIB")"
+if (( MEM_CAPACITY < 1 )); then
+    error "a single ${MEM_MIB} MiB instance does not fit on this host"
+    error "(${HOST_MEM_MIB} MiB total, ${FC_HOST_RESERVE_MIB} MiB reserved for the host, ${FC_VMM_OVERHEAD_MIB} MiB VMM overhead)"
+    exit 1
+elif (( NUM_INSTANCES > MEM_CAPACITY )); then
+    error "-n $NUM_INSTANCES exceeds host memory capacity: $MEM_CAPACITY instance(s) at ${MEM_MIB} MiB each"
+    error "(${HOST_MEM_MIB} MiB total, ${FC_HOST_RESERVE_MIB} MiB reserved for the host, ${FC_VMM_OVERHEAD_MIB} MiB VMM overhead per VM)"
+    error "lower -n or -m, or raise the ceiling with FC_HOST_RESERVE_MIB / FC_VMM_OVERHEAD_MIB"
+    exit 1
+fi
+echo "Memory: ${MEM_MIB} MiB x $NUM_INSTANCES of ${HOST_MEM_MIB} MiB host (capacity $MEM_CAPACITY instances)"
+
 BASE_ROOTFS="$HERE/$ROOTFS_IMAGE"
 [[ -f "$BASE_ROOTFS" ]] || { error "base rootfs not found: $BASE_ROOTFS (run install_build.sh)"; exit 1; }
 [[ -f "$HERE/function.ext4" ]] || { error "function drive not found: $HERE/function.ext4 (run function_scripts/build_function.sh)"; exit 1; }
@@ -91,9 +119,6 @@ sudo bash "$HERE/function_scripts/setup_tap.sh" -n "$NUM_INSTANCES"
 # Allocate 1 full vCPU of host CPU time per 1769 MB of guest memory (AWS Lambda
 # ratio). vm_config's vcpu_count only creates virtual CPUs inside the guest; the
 # real host CPU allocation is enforced here via cpu.max. 
-
-MEM_MIB=$(jq -r '."machine-config".mem_size_mib' "$HERE/vm_config.template.json")
-[[ -n "$MEM_OVERRIDE" ]] && MEM_MIB="$MEM_OVERRIDE"
 
 CPU_PERIOD_US=100000
 CPU_QUOTA_US=$((MEM_MIB * CPU_PERIOD_US / 1769))
