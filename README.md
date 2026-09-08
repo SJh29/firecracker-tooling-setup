@@ -1,7 +1,7 @@
-# MiniLambda
+# FaaS Infrastructure Simulator Harness (FISH)
 ## Firecracker Based Lambda Emulator
 
-An AWS Lambda emulator built on [Firecracker](https://github.com/firecracker-microvm/firecracker) microVMs, running actual AWS Lambda base images. In head-to-head benchmarking against real AWS Lambda on identical hardware, observed performance differs by approximately 0.5% in SAAF metrics overall.
+FISH is an AWS Lambda emulator built on [Firecracker](https://github.com/firecracker-microvm/firecracker) microVMs, running actual AWS Lambda base images. In head-to-head benchmarking against real AWS Lambda on identical hardware, observed performance differs by approximately 0.5% in SAAF metrics overall.
 
 ## Fidelity vs. real AWS Lambda
 
@@ -102,7 +102,9 @@ Assumed already present on the host (not installed by any script here): `sha256s
 
 ## Concurrency
 
-Instance `k` owns `/tmp/firecracker/<k>.socket`, a writable `/tmp` scratch drive `instances/scratch-<k>.ext4`, `tap<k>`, host IP `172.16.0.<4k+1>` and guest IP `172.16.0.<4k+2>`. The rootfs and function drive are shared read-only. 
+Instance `k` owns `/tmp/firecracker/<k>.socket`, a writable `/tmp` scratch drive `instances/scratch-<k>.ext4`, `tap<k>`, host IP `172.16.<k/64>.<4(k%64)+1>` and guest IP `172.16.<k/64>.<4(k%64)+2>`. The rootfs and function drive are shared read-only.
+
+The addressing caps `-n` at 16384 instances, but host RAM binds first: `run_firecracker.sh` refuses a fleet larger than `(MemTotal - 2048 MiB) / (mem_size_mib + 8 MiB)`, so a 192 GiB host takes 54 VMs at the template's 3538 MiB and 1430 at 128 MiB. See [the memory ceiling](./docs/function_scripts.md#the-memory-ceiling).
 
 ## Documentation
 
